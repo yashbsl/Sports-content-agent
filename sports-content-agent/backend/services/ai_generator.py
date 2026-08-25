@@ -101,9 +101,10 @@ def get_web_context(
 
     try:
         return search_web(
-            query=query,
-            max_results=5
-        )
+    query=query,
+    sport=sport,
+    max_results=5
+)
 
     except Exception:
         return []

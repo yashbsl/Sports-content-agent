@@ -4,8 +4,13 @@ import re
 from typing import Any
 
 import requests
+from dotenv import load_dotenv
 
 from services.web_search import search_web
+from services.vector_store import search_knowledge
+
+
+load_dotenv()
 
 
 # ============================================================
@@ -27,10 +32,6 @@ OLLAMA_TIMEOUT = int(
 )
 
 
-# ============================================================
-# SUPPORTED TYPES
-# ============================================================
-
 SUPPORTED_CONTENT_TYPES = {
     "mcq",
     "true_false",
@@ -48,15 +49,12 @@ SUPPORTED_DIFFICULTIES = {
 
 
 # ============================================================
-# GENERAL HELPERS
+# HELPERS
 # ============================================================
 
 def clean_string(value: Any) -> str:
-
     if not isinstance(value, str):
-        raise ValueError(
-            "Expected a string value."
-        )
+        raise ValueError("Expected a string.")
 
     value = re.sub(
         r"\s+",
@@ -65,46 +63,35 @@ def clean_string(value: Any) -> str:
     )
 
     if not value:
-        raise ValueError(
-            "Value cannot be empty."
-        )
+        raise ValueError("Value cannot be empty.")
 
     return value
 
 
-def unique_strings(
-    values: list[str]
-) -> bool:
-
+def unique_strings(values):
     normalized = [
         value.casefold()
         for value in values
     ]
 
-    return len(normalized) == len(
-        set(normalized)
-    )
+    return len(normalized) == len(set(normalized))
 
 
 # ============================================================
-# WEB SEARCH CONTEXT
+# WEB SEARCH
 # ============================================================
 
 def get_web_context(
-    sport: str,
-    content_type: str,
-    difficulty: str
+    sport,
+    content_type,
+    difficulty
 ):
     """
-    Search the web for relevant sports information.
-
-    For factual formats, retrieved information is passed
-    into the LLM so the model can ground its answer.
+    Retrieve current/relevant sports information
+    from web search.
     """
 
     if content_type == "poll":
-
-        # Poll is opinion based, so factual retrieval is not necessary.
         return []
 
     query = (
@@ -113,32 +100,18 @@ def get_web_context(
     )
 
     try:
-
-        sources = search_web(
+        return search_web(
             query=query,
             max_results=5
         )
 
-        return sources
-
     except Exception:
-        # We don't silently fabricate context.
-        # Generation can continue, but the item will be marked
-        # as not web-grounded.
         return []
 
 
-def format_sources_for_prompt(
-    sources: list[dict]
-) -> str:
-
+def format_web_context(sources):
     if not sources:
-
-        return (
-            "No web sources were retrieved. "
-            "Use only highly established facts and do not "
-            "invent uncertain information."
-        )
+        return "No web sources were retrieved."
 
     parts = []
 
@@ -146,49 +119,98 @@ def format_sources_for_prompt(
         sources,
         start=1
     ):
-
         parts.append(
             f"""
-SOURCE {index}
-Title: {source["title"]}
-URL: {source["url"]}
-Information: {source["snippet"]}
+WEB SOURCE {index}
+Title: {source.get("title", "")}
+URL: {source.get("url", "")}
+Information: {source.get("snippet", "")}
 """
         )
 
     return "\n".join(parts)
 
 
-def build_source_objects(
-    sources: list[dict]
-):
-    """
-    Keep only useful fields for the API response.
-    """
-
-    result = []
-
-    for source in sources:
-
-        result.append({
-            "title": source["title"],
-            "url": source["url"],
-        })
-
-    return result
+def build_source_objects(sources):
+    return [
+        {
+            "title": source.get("title", ""),
+            "url": source.get("url", "")
+        }
+        for source in sources
+    ]
 
 
 # ============================================================
-# JSON PARSING
+# CHROMADB
 # ============================================================
 
-def extract_json(
-    text: str
+def get_knowledge_context(
+    sport,
+    content_type,
+    difficulty
 ):
+    """
+    Retrieve stable/historical sports facts
+    from ChromaDB.
+    """
+
+    query = (
+        f"{sport} {content_type} "
+        f"{difficulty} rules facts history statistics"
+    )
+
+    try:
+        return search_knowledge(
+            query=query,
+            sport=sport,
+            top_k=4
+        )
+
+    except Exception:
+        return []
+
+
+def format_knowledge_context(results):
+    if not results:
+        return "No local knowledge-base facts were found."
+
+    parts = []
+
+    for index, item in enumerate(
+        results,
+        start=1
+    ):
+        parts.append(
+            f"""
+KNOWLEDGE BASE FACT {index}
+Category: {item.get("category", "")}
+Fact: {item.get("text", "")}
+"""
+        )
+
+    return "\n".join(parts)
+
+
+def build_knowledge_objects(results):
+    return [
+        {
+            "id": item.get("id", ""),
+            "category": item.get("category", ""),
+            "text": item.get("text", "")
+        }
+        for item in results
+    ]
+
+
+# ============================================================
+# JSON PARSER
+# ============================================================
+
+def extract_json(text):
 
     text = text.strip()
 
-    # Remove markdown fences
     text = re.sub(
         r"^```(?:json)?\s*",
         "",
@@ -204,15 +226,11 @@ def extract_json(
 
     text = text.strip()
 
-    # Direct JSON
     try:
-
         return json.loads(text)
-
     except json.JSONDecodeError:
         pass
 
-    # Find JSON object
     start = text.find("{")
 
     if start == -1:
@@ -228,7 +246,6 @@ def extract_json(
         start,
         len(text)
     ):
-
         char = text[index]
 
         if escaped:
@@ -250,25 +267,20 @@ def extract_json(
             depth += 1
 
         elif char == "}":
-
             depth -= 1
 
             if depth == 0:
-
                 candidate = text[
                     start:index + 1
                 ]
 
                 try:
-                    return json.loads(
-                        candidate
-                    )
-
+                    return json.loads(candidate)
                 except json.JSONDecodeError:
                     break
 
     raise ValueError(
-        f"AI returned invalid JSON:\n{text}"
+        f"Invalid JSON from AI:\n{text}"
     )
 
 
@@ -276,9 +288,7 @@ def extract_json(
 # OLLAMA
 # ============================================================
 
-def call_ollama(
-    prompt: str
-):
+def call_ollama(prompt):
 
     payload = {
         "model": MODEL,
@@ -288,12 +298,11 @@ def call_ollama(
         "options": {
             "temperature": 0.15,
             "top_p": 0.8,
-            "num_predict": 2200,
-        },
+            "num_predict": 2200
+        }
     }
 
     try:
-
         response = requests.post(
             OLLAMA_URL,
             json=payload,
@@ -301,26 +310,22 @@ def call_ollama(
         )
 
     except requests.exceptions.ConnectionError as error:
-
         raise RuntimeError(
             "Cannot connect to Ollama. "
             "Make sure Ollama is running."
         ) from error
 
     except requests.exceptions.Timeout as error:
-
         raise RuntimeError(
             "Ollama request timed out."
         ) from error
 
     except requests.exceptions.RequestException as error:
-
         raise RuntimeError(
             f"Ollama request failed: {error}"
         ) from error
 
     if response.status_code != 200:
-
         raise RuntimeError(
             f"Ollama returned HTTP "
             f"{response.status_code}: "
@@ -328,11 +333,8 @@ def call_ollama(
         )
 
     try:
-
         data = response.json()
-
     except json.JSONDecodeError as error:
-
         raise RuntimeError(
             "Ollama returned invalid HTTP JSON."
         ) from error
@@ -343,14 +345,33 @@ def call_ollama(
     ).strip()
 
     if not raw_response:
-
         raise RuntimeError(
             "Ollama returned an empty response."
         )
 
-    return extract_json(
-        raw_response
-    )
+    return extract_json(raw_response)
+
+
+# ============================================================
+# COMMON PROMPT
+# ============================================================
+
+COMMON_RULES = """
+You are an expert sports content generator.
+
+IMPORTANT:
+
+1. Use the supplied retrieved context.
+2. Prefer facts directly supported by the retrieved context.
+3. Never invent statistics.
+4. Never invent records.
+5. Never invent players, teams, rules or events.
+6. Never create mathematically impossible sports facts.
+7. Keep content relevant to the requested sport.
+8. Return ONLY valid JSON.
+9. Do not return markdown.
+10. Do not add text outside the JSON.
+"""
 
 
 # ============================================================
@@ -361,40 +382,35 @@ def build_mcq_prompt(
     sport,
     difficulty,
     quantity,
-    source_context
+    web_context,
+    knowledge_context
 ):
-
     return f"""
-You are an expert {sport} sports content generator.
+{COMMON_RULES}
+
+SPORT: {sport}
+DIFFICULTY: {difficulty}
+QUANTITY: {quantity}
+
+WEB SEARCH CONTEXT:
+{web_context}
+
+CHROMADB CONTEXT:
+{knowledge_context}
 
 Generate exactly {quantity} MCQs.
 
-Difficulty: {difficulty}
+MCQ RULES:
 
-Use the retrieved sources below as factual grounding.
+- Exactly 4 options.
+- Options must be unique.
+- Exactly one correct answer.
+- correct_answer must exactly match one option.
+- No "all of the above".
+- No "none of the above".
+- Explanation must support the answer.
 
-RETRIEVED SOURCES:
-{source_context}
-
-STRICT RULES:
-
-1. Questions MUST be about {sport}.
-2. Use factual information supported by the sources whenever possible.
-3. Do NOT invent facts.
-4. Do NOT invent statistics.
-5. Do NOT invent records.
-6. Exactly 4 options.
-7. All 4 options must be different.
-8. Exactly ONE option is correct.
-9. correct_answer MUST exactly match one option.
-10. Do not use A/B/C/D as correct_answer.
-11. Do not use "all of the above".
-12. Do not use "none of the above".
-13. Explanation must support the selected answer.
-14. Do not create mathematically or physically impossible sports facts.
-15. Keep the question concise.
-
-Return ONLY this JSON:
+Return:
 
 {{
   "items": [
@@ -418,30 +434,31 @@ def build_true_false_prompt(
     sport,
     difficulty,
     quantity,
-    source_context
+    web_context,
+    knowledge_context
 ):
-
     return f"""
-You are an expert {sport} sports content generator.
+{COMMON_RULES}
+
+SPORT: {sport}
+DIFFICULTY: {difficulty}
+QUANTITY: {quantity}
+
+WEB SEARCH CONTEXT:
+{web_context}
+
+CHROMADB CONTEXT:
+{knowledge_context}
 
 Generate exactly {quantity} True/False questions.
 
-Difficulty: {difficulty}
+Rules:
+- Statement must be objectively true or false.
+- No opinions.
+- No ambiguity.
+- Explanation must justify the answer.
 
-Use these sources for factual grounding:
-
-{source_context}
-
-RULES:
-
-1. Statement must be objectively true or false.
-2. No opinions.
-3. No ambiguous wording.
-4. Do not invent facts.
-5. Explanation must justify the answer.
-6. Use established facts supported by sources.
-
-Return ONLY:
+Return:
 
 {{
   "items": [
@@ -460,24 +477,23 @@ def build_poll_prompt(
     difficulty,
     quantity
 ):
-
     return f"""
-You are an expert sports engagement content creator.
+You are an expert sports engagement generator.
 
-Generate exactly {quantity} opinion-based polls about {sport}.
+SPORT: {sport}
+DIFFICULTY: {difficulty}
+QUANTITY: {quantity}
 
-Difficulty: {difficulty}
+Generate exactly {quantity} opinion-based polls.
 
-IMPORTANT:
+Rules:
+- Exactly 2 options.
+- Options must be different.
+- No correct answer.
+- Poll must be opinion based.
+- Keep it relevant to {sport}.
 
-1. Polls are opinion based.
-2. Do not claim one answer is objectively correct.
-3. Every poll must have EXACTLY 2 options.
-4. Options must be different.
-5. Do not include correct_answer.
-6. Keep them relevant to {sport}.
-
-Return ONLY:
+Return:
 
 {{
   "items": [
@@ -498,35 +514,37 @@ def build_fill_blank_prompt(
     sport,
     difficulty,
     quantity,
-    source_context
+    web_context,
+    knowledge_context
 ):
-
     return f"""
-You are an expert {sport} sports quiz generator.
+{COMMON_RULES}
+
+SPORT: {sport}
+DIFFICULTY: {difficulty}
+QUANTITY: {quantity}
+
+WEB SEARCH CONTEXT:
+{web_context}
+
+CHROMADB CONTEXT:
+{knowledge_context}
 
 Generate exactly {quantity} fill-in-the-blank questions.
 
-Difficulty: {difficulty}
+Rules:
+- Exactly 4 options.
+- Options must be unique.
+- Exactly one correct answer.
+- correct_answer must exactly match one option.
+- Explanation must support the answer.
 
-Use these sources:
-
-{source_context}
-
-RULES:
-
-1. The blank must have one objectively correct answer.
-2. Exactly 4 answer options.
-3. Options must be different.
-4. correct_answer must exactly match one option.
-5. Do not invent information.
-6. Explanation must support the answer.
-
-Return ONLY:
+Return:
 
 {{
   "items": [
     {{
-      "question": "Complete the statement: ____",
+      "question": "... ____ ...",
       "options": [
         "...",
         "...",
@@ -545,30 +563,32 @@ def build_guess_number_prompt(
     sport,
     difficulty,
     quantity,
-    source_context
+    web_context,
+    knowledge_context
 ):
-
     return f"""
-You are an expert {sport} sports quiz generator.
+{COMMON_RULES}
+
+SPORT: {sport}
+DIFFICULTY: {difficulty}
+QUANTITY: {quantity}
+
+WEB SEARCH CONTEXT:
+{web_context}
+
+CHROMADB CONTEXT:
+{knowledge_context}
 
 Generate exactly {quantity} Guess-the-Number questions.
 
-Difficulty: {difficulty}
+Rules:
+- Use a real numerical sports fact.
+- target must be numeric.
+- tolerance must be numeric.
+- tolerance must not be negative.
+- Explanation must support the target.
 
-Use these sources for the numerical facts:
-
-{source_context}
-
-RULES:
-
-1. Use a real established numerical fact.
-2. Do not invent statistics.
-3. Target must be numeric.
-4. Tolerance must be numeric and non-negative.
-5. Question must clearly ask for the number.
-6. Explanation must support the number.
-
-Return ONLY:
+Return:
 
 {{
   "items": [
@@ -584,12 +604,10 @@ Return ONLY:
 
 
 # ============================================================
-# VALIDATION
+# VALIDATORS
 # ============================================================
 
-def validate_mcq(
-    item
-):
+def validate_mcq(item):
 
     required = [
         "question",
@@ -599,30 +617,19 @@ def validate_mcq(
     ]
 
     for field in required:
-
         if field not in item:
-
             raise ValueError(
                 f"MCQ missing field: {field}"
             )
 
-    question = clean_string(
-        item["question"]
-    )
-
     options = item["options"]
 
-    if not isinstance(
-        options,
-        list
-    ):
-
+    if not isinstance(options, list):
         raise ValueError(
             "MCQ options must be a list."
         )
 
     if len(options) != 4:
-
         raise ValueError(
             "MCQ must have exactly 4 options."
         )
@@ -633,43 +640,40 @@ def validate_mcq(
     ]
 
     if not unique_strings(options):
-
         raise ValueError(
             "MCQ options must be unique."
         )
 
-    correct = clean_string(
+    correct_answer = clean_string(
         item["correct_answer"]
     )
 
-    matching_option = None
+    correct_option = None
 
     for option in options:
-
-        if option.casefold() == correct.casefold():
-
-            matching_option = option
+        if option.casefold() == correct_answer.casefold():
+            correct_option = option
             break
 
-    if matching_option is None:
-
+    if correct_option is None:
         raise ValueError(
-            "correct_answer must match one of the options."
+            "correct_answer must match "
+            "one of the options."
         )
 
     return {
-        "question": question,
+        "question": clean_string(
+            item["question"]
+        ),
         "options": options,
-        "correct_answer": matching_option,
+        "correct_answer": correct_option,
         "explanation": clean_string(
             item["explanation"]
-        ),
+        )
     }
 
 
-def validate_true_false(
-    item
-):
+def validate_true_false(item):
 
     required = [
         "question",
@@ -678,41 +682,25 @@ def validate_true_false(
     ]
 
     for field in required:
-
         if field not in item:
-
             raise ValueError(
                 f"True/False missing field: {field}"
             )
 
     answer = item["correct_answer"]
 
-    if isinstance(
-        answer,
-        bool
-    ):
-
+    if isinstance(answer, bool):
         final_answer = answer
-
     else:
-
-        value = str(
-            answer
-        ).lower().strip()
+        value = str(answer).strip().lower()
 
         if value == "true":
-
             final_answer = True
-
         elif value == "false":
-
             final_answer = False
-
         else:
-
             raise ValueError(
-                "True/False answer must be "
-                "true or false."
+                "True/False answer must be true or false."
             )
 
     return {
@@ -722,39 +710,30 @@ def validate_true_false(
         "correct_answer": final_answer,
         "explanation": clean_string(
             item["explanation"]
-        ),
+        )
     }
 
 
-def validate_poll(
-    item
-):
+def validate_poll(item):
 
     if "question" not in item:
-
         raise ValueError(
             "Poll missing question."
         )
 
     if "options" not in item:
-
         raise ValueError(
             "Poll missing options."
         )
 
     options = item["options"]
 
-    if not isinstance(
-        options,
-        list
-    ):
-
+    if not isinstance(options, list):
         raise ValueError(
             "Poll options must be a list."
         )
 
     if len(options) != 2:
-
         raise ValueError(
             "Poll must have exactly 2 options."
         )
@@ -765,7 +744,6 @@ def validate_poll(
     ]
 
     if not unique_strings(options):
-
         raise ValueError(
             "Poll options must be unique."
         )
@@ -775,13 +753,11 @@ def validate_poll(
             item["question"]
         ),
         "options": options,
-        "opinion_based": True,
+        "opinion_based": True
     }
 
 
-def validate_fill_blank(
-    item
-):
+def validate_fill_blank(item):
 
     required = [
         "question",
@@ -791,28 +767,21 @@ def validate_fill_blank(
     ]
 
     for field in required:
-
         if field not in item:
-
             raise ValueError(
-                f"Fill blank missing field: {field}"
+                f"Fill Blank missing field: {field}"
             )
 
     options = item["options"]
 
-    if not isinstance(
-        options,
-        list
-    ):
-
+    if not isinstance(options, list):
         raise ValueError(
-            "Fill blank options must be a list."
+            "Fill Blank options must be a list."
         )
 
     if len(options) != 4:
-
         raise ValueError(
-            "Fill blank must have exactly 4 options."
+            "Fill Blank must have exactly 4 options."
         )
 
     options = [
@@ -821,29 +790,25 @@ def validate_fill_blank(
     ]
 
     if not unique_strings(options):
-
         raise ValueError(
-            "Fill blank options must be unique."
+            "Fill Blank options must be unique."
         )
 
-    correct = clean_string(
+    correct_answer = clean_string(
         item["correct_answer"]
     )
 
-    matching = None
+    correct_option = None
 
     for option in options:
-
-        if option.casefold() == correct.casefold():
-
-            matching = option
+        if option.casefold() == correct_answer.casefold():
+            correct_option = option
             break
 
-    if matching is None:
-
+    if correct_option is None:
         raise ValueError(
-            "Fill blank correct_answer must "
-            "match one of the options."
+            "Fill Blank correct_answer must "
+            "match one option."
         )
 
     return {
@@ -851,16 +816,14 @@ def validate_fill_blank(
             item["question"]
         ),
         "options": options,
-        "correct_answer": matching,
+        "correct_answer": correct_option,
         "explanation": clean_string(
             item["explanation"]
-        ),
+        )
     }
 
 
-def validate_guess_number(
-    item
-):
+def validate_guess_number(item):
 
     required = [
         "question",
@@ -870,51 +833,31 @@ def validate_guess_number(
     ]
 
     for field in required:
-
         if field not in item:
-
             raise ValueError(
-                f"Guess number missing field: {field}"
+                f"Guess Number missing field: {field}"
             )
 
-    if isinstance(
-        item["target"],
-        bool
-    ):
+    target = item["target"]
+    tolerance = item["tolerance"]
 
+    if isinstance(target, bool) or not isinstance(
+        target,
+        (int, float)
+    ):
         raise ValueError(
             "Target must be numeric."
         )
 
-    if isinstance(
-        item["tolerance"],
-        bool
+    if isinstance(tolerance, bool) or not isinstance(
+        tolerance,
+        (int, float)
     ):
-
         raise ValueError(
             "Tolerance must be numeric."
         )
 
-    if not isinstance(
-        item["target"],
-        (int, float)
-    ):
-
-        raise ValueError(
-            "Target must be numeric."
-        )
-
-    if not isinstance(
-        item["tolerance"],
-        (int, float)
-    ):
-
-        raise ValueError(
-            "Tolerance must be numeric."
-        )
-
-    if item["tolerance"] < 0:
-
+    if tolerance < 0:
         raise ValueError(
             "Tolerance cannot be negative."
         )
@@ -923,61 +866,12 @@ def validate_guess_number(
         "question": clean_string(
             item["question"]
         ),
-        "target": item["target"],
-        "tolerance": item["tolerance"],
+        "target": target,
+        "tolerance": tolerance,
         "explanation": clean_string(
             item["explanation"]
-        ),
+        )
     }
-
-
-def validate_mixed(
-    item
-):
-
-    content_type = item.get(
-        "type"
-    )
-
-    if content_type == "mcq":
-
-        result = validate_mcq(
-            item
-        )
-
-    elif content_type == "true_false":
-
-        result = validate_true_false(
-            item
-        )
-
-    elif content_type == "poll":
-
-        result = validate_poll(
-            item
-        )
-
-    elif content_type == "fill_blank":
-
-        result = validate_fill_blank(
-            item
-        )
-
-    elif content_type == "guess_number":
-
-        result = validate_guess_number(
-            item
-        )
-
-    else:
-
-        raise ValueError(
-            f"Unsupported mixed type: {content_type}"
-        )
-
-    result["type"] = content_type
-
-    return result
 
 
 # ============================================================
@@ -999,39 +893,54 @@ def generate_question(
     content_type = content_type.strip().lower()
 
     if difficulty not in SUPPORTED_DIFFICULTIES:
-
         raise ValueError(
             "Difficulty must be easy, medium or hard."
         )
 
     if content_type not in SUPPORTED_CONTENT_TYPES:
-
         raise ValueError(
             "Unsupported content type."
         )
 
     if quantity < 1 or quantity > 20:
-
         raise ValueError(
             "Quantity must be between 1 and 20."
         )
 
     # --------------------------------------------------------
-    # Get web context
+    # RETRIEVE WEB DATA
     # --------------------------------------------------------
 
-    sources = get_web_context(
+    web_sources = get_web_context(
         sport=sport,
         content_type=content_type,
         difficulty=difficulty
     )
 
-    source_context = format_sources_for_prompt(
-        sources
+    # --------------------------------------------------------
+    # RETRIEVE CHROMADB DATA
+    # --------------------------------------------------------
+
+    knowledge_results = get_knowledge_context(
+        sport=sport,
+        content_type=content_type,
+        difficulty=difficulty
     )
 
     # --------------------------------------------------------
-    # Build correct prompt
+    # FORMAT CONTEXT
+    # --------------------------------------------------------
+
+    web_context = format_web_context(
+        web_sources
+    )
+
+    knowledge_context = format_knowledge_context(
+        knowledge_results
+    )
+
+    # --------------------------------------------------------
+    # BUILD PROMPT
     # --------------------------------------------------------
 
     if content_type == "mcq":
@@ -1040,7 +949,8 @@ def generate_question(
             sport,
             difficulty,
             quantity,
-            source_context
+            web_context,
+            knowledge_context
         )
 
     elif content_type == "true_false":
@@ -1049,7 +959,8 @@ def generate_question(
             sport,
             difficulty,
             quantity,
-            source_context
+            web_context,
+            knowledge_context
         )
 
     elif content_type == "poll":
@@ -1066,7 +977,8 @@ def generate_question(
             sport,
             difficulty,
             quantity,
-            source_context
+            web_context,
+            knowledge_context
         )
 
     elif content_type == "guess_number":
@@ -1075,7 +987,8 @@ def generate_question(
             sport,
             difficulty,
             quantity,
-            source_context
+            web_context,
+            knowledge_context
         )
 
     else:
@@ -1083,24 +996,19 @@ def generate_question(
         prompt = f"""
 {COMMON_RULES}
 
-Generate exactly {quantity} mixed content items about {sport}.
+SPORT: {sport}
+DIFFICULTY: {difficulty}
+QUANTITY: {quantity}
 
-Use these types:
-- mcq
-- true_false
-- poll
-- fill_blank
-- guess_number
+WEB SEARCH:
+{web_context}
 
-Use the retrieved information below:
+CHROMADB:
+{knowledge_context}
 
-{source_context}
+Generate exactly {quantity} mixed items.
 
-Every item MUST contain:
-
-"type"
-
-Return ONLY:
+Return:
 
 {{
   "items": [...]
@@ -1108,7 +1016,7 @@ Return ONLY:
 """
 
     # --------------------------------------------------------
-    # Retry generation
+    # GENERATE + VALIDATE
     # --------------------------------------------------------
 
     last_error = None
@@ -1129,65 +1037,104 @@ Return ONLY:
                 items,
                 list
             ):
-
                 raise ValueError(
                     "AI response does not contain "
                     "an items array."
                 )
 
             if len(items) < quantity:
-
                 raise ValueError(
-                    f"AI generated {len(items)} "
-                    f"items, expected {quantity}."
+                    f"AI generated {len(items)} items, "
+                    f"expected {quantity}."
                 )
 
             validated_items = []
 
-            for item in items[:quantity]:
+            for raw_item in items[:quantity]:
 
                 if content_type == "mcq":
 
                     validated = validate_mcq(
-                        item
+                        raw_item
                     )
 
                 elif content_type == "true_false":
 
                     validated = validate_true_false(
-                        item
+                        raw_item
                     )
 
                 elif content_type == "poll":
 
                     validated = validate_poll(
-                        item
+                        raw_item
                     )
 
                 elif content_type == "fill_blank":
 
                     validated = validate_fill_blank(
-                        item
+                        raw_item
                     )
 
                 elif content_type == "guess_number":
 
                     validated = validate_guess_number(
-                        item
+                        raw_item
                     )
 
                 else:
 
-                    validated = validate_mixed(
-                        item
+                    item_type = raw_item.get(
+                        "type"
                     )
 
-                # Add sources for factual content.
+                    if item_type == "mcq":
+                        validated = validate_mcq(
+                            raw_item
+                        )
+
+                    elif item_type == "true_false":
+                        validated = validate_true_false(
+                            raw_item
+                        )
+
+                    elif item_type == "poll":
+                        validated = validate_poll(
+                            raw_item
+                        )
+
+                    elif item_type == "fill_blank":
+                        validated = validate_fill_blank(
+                            raw_item
+                        )
+
+                    elif item_type == "guess_number":
+                        validated = validate_guess_number(
+                            raw_item
+                        )
+
+                    else:
+                        raise ValueError(
+                            f"Unknown mixed type: {item_type}"
+                        )
+
+                    validated["type"] = item_type
+
+                # ------------------------------------------------
+                # Attach grounding information
+                # ------------------------------------------------
+
                 if content_type != "poll":
 
                     validated["sources"] = (
                         build_source_objects(
-                            sources
+                            web_sources
+                        )
+                    )
+
+                    validated["knowledge_sources"] = (
+                        build_knowledge_objects(
+                            knowledge_results
                         )
                     )
 
@@ -1205,18 +1152,19 @@ Return ONLY:
 
 RETRY {attempt + 1}
 
-The previous response failed validation.
+Previous generation failed validation.
 
-Make sure:
-- JSON is valid.
-- Quantity is exactly {quantity}.
-- All required fields exist.
-- MCQ has exactly 4 unique options.
-- MCQ correct_answer exactly matches an option.
-- Poll has exactly 2 unique options.
-- Fill blank has exactly 4 unique options.
-- Guess number target and tolerance are numeric.
+Follow EXACTLY:
+
+- Generate exactly {quantity} items.
+- MCQ = exactly 4 unique options.
+- MCQ correct_answer must match an option.
+- Poll = exactly 2 unique options.
+- Fill Blank = exactly 4 unique options.
+- Guess Number = numeric target and tolerance.
+- Use the supplied web and ChromaDB context.
 - Do not invent facts.
+- Return only JSON.
 """
 
     raise RuntimeError(

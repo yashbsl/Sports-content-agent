@@ -1,21 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 
-function CustomSelect({
-  label,
-  value,
-  options,
-  onChange,
-  icon = "◈",
-}) {
+function CustomSelect({ label, value, options, onChange, icon = "◈" }) {
   const [open, setOpen] = useState(false);
   const dropdownRef = useRef(null);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
-      if (
-        dropdownRef.current &&
-        !dropdownRef.current.contains(event.target)
-      ) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
         setOpen(false);
       }
     };
@@ -27,9 +18,7 @@ function CustomSelect({
     };
   }, []);
 
-  const selectedOption = options.find(
-    (option) => option.value === value
-  );
+  const selectedOption = options.find((option) => option.value === value);
 
   return (
     <div className="relative" ref={dropdownRef}>
@@ -88,13 +77,9 @@ function CustomSelect({
                     : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
                 }`}
               >
-                <span className="text-sm font-medium">
-                  {option.label}
-                </span>
+                <span className="text-sm font-medium">{option.label}</span>
 
-                {isSelected && (
-                  <span className="text-orange-500">✓</span>
-                )}
+                {isSelected && <span className="text-orange-500">✓</span>}
               </button>
             );
           })}
@@ -104,6 +89,7 @@ function CustomSelect({
   );
 }
 
+const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 function App() {
   const [sport, setSport] = useState("Cricket");
   const [difficulty, setDifficulty] = useState("medium");
@@ -119,9 +105,7 @@ function App() {
 
   const [history, setHistory] = useState(() => {
     try {
-      return JSON.parse(
-        localStorage.getItem("sports_ai_history") || "[]"
-      );
+      return JSON.parse(localStorage.getItem("sports_ai_history") || "[]");
     } catch {
       return [];
     }
@@ -163,10 +147,7 @@ function App() {
     setHistory((prev) => {
       const updated = [historyItem, ...prev].slice(0, 10);
 
-      localStorage.setItem(
-        "sports_ai_history",
-        JSON.stringify(updated)
-      );
+      localStorage.setItem("sports_ai_history", JSON.stringify(updated));
 
       return updated;
     });
@@ -178,28 +159,23 @@ function App() {
     setContent([]);
 
     try {
-      const response = await fetch(
-        "http://127.0.0.1:8000/generate",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            sport,
-            difficulty,
-            content_type: contentType,
-            quantity: Number(quantity),
-          }),
-        }
-      );
+      const response = await fetch("http://127.0.0.1:8000/generate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          sport,
+          difficulty,
+          content_type: contentType,
+          quantity: Number(quantity),
+        }),
+      });
 
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(
-          data.detail || "Content generation failed."
-        );
+        throw new Error(data.detail || "Content generation failed.");
       }
 
       const generated = data.generated_content || [];
@@ -218,42 +194,35 @@ function App() {
     setError("");
 
     try {
-      const response = await fetch(
-        "http://127.0.0.1:8000/generate",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            sport,
-            difficulty,
-            content_type: contentType,
-            quantity: 1,
-          }),
-        }
-      );
+      const response = await fetch("http://127.0.0.1:8000/generate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          sport,
+          difficulty,
+          content_type: contentType,
+          quantity: 1,
+        }),
+      });
 
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(
-          data.detail || "Regeneration failed."
-        );
+        throw new Error(data.detail || "Regeneration failed.");
       }
 
       const regenerated = data.generated_content?.[0];
 
       if (!regenerated) {
-        throw new Error(
-          "No regenerated content received."
-        );
+        throw new Error("No regenerated content received.");
       }
 
       setContent((prev) =>
         prev.map((item, itemIndex) =>
-          itemIndex === index ? regenerated : item
-        )
+          itemIndex === index ? regenerated : item,
+        ),
       );
     } catch (err) {
       setError(err.message);
@@ -269,9 +238,7 @@ function App() {
       ...(item.options
         ? item.options.map(
             (option, optionIndex) =>
-              `${String.fromCharCode(
-                65 + optionIndex
-              )}. ${option}`
+              `${String.fromCharCode(65 + optionIndex)}. ${option}`,
           )
         : []),
 
@@ -279,13 +246,9 @@ function App() {
         ? `Correct Answer: ${item.correct_answer}`
         : "",
 
-      item.answer !== undefined
-        ? `Answer: ${item.answer}`
-        : "",
+      item.answer !== undefined ? `Answer: ${item.answer}` : "",
 
-      item.explanation
-        ? `Explanation: ${item.explanation}`
-        : "",
+      item.explanation ? `Explanation: ${item.explanation}` : "",
     ]
       .filter(Boolean)
       .join("\n");
@@ -329,12 +292,9 @@ function App() {
       generated_content: content,
     };
 
-    const blob = new Blob(
-      [JSON.stringify(payload, null, 2)],
-      {
-        type: "application/json",
-      }
-    );
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json",
+    });
 
     const url = URL.createObjectURL(blob);
 
@@ -387,8 +347,7 @@ function App() {
           const letter = String.fromCharCode(65 + index);
 
           const isCorrect =
-            item.correct_answer !== undefined &&
-            option === item.correct_answer;
+            item.correct_answer !== undefined && option === item.correct_answer;
 
           return (
             <div
@@ -438,7 +397,6 @@ function App() {
         <div className="h-1 w-full bg-gradient-to-r from-amber-400 via-orange-500 to-yellow-400" />
 
         <div className="p-6 sm:p-7">
-
           {/* Header */}
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-3">
@@ -457,20 +415,14 @@ function App() {
                 disabled={regenerating === index}
                 className="rounded-xl border border-orange-200 bg-orange-50 px-3 py-2 text-xs font-medium text-orange-600 transition hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {regenerating === index
-                  ? "Generating..."
-                  : "↻ Regenerate"}
+                {regenerating === index ? "Generating..." : "↻ Regenerate"}
               </button>
 
               <button
-                onClick={() =>
-                  copyQuestion(item, index)
-                }
+                onClick={() => copyQuestion(item, index)}
                 className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 transition hover:bg-slate-50"
               >
-                {copied === index
-                  ? "✓ Copied"
-                  : "⧉ Copy"}
+                {copied === index ? "✓ Copied" : "⧉ Copy"}
               </button>
             </div>
           </div>
@@ -481,9 +433,7 @@ function App() {
           </h3>
 
           {/* Options */}
-          {(type === "mcq" ||
-            type === "poll" ||
-            type === "fill_blank") &&
+          {(type === "mcq" || type === "poll" || type === "fill_blank") &&
             renderOptions(item)}
 
           {/* True / False */}
@@ -496,13 +446,9 @@ function App() {
                     : "border-slate-200 bg-slate-50 text-slate-500"
                 }`}
               >
-                <div className="text-2xl">
-                  ✓
-                </div>
+                <div className="text-2xl">✓</div>
 
-                <div className="mt-2 text-sm font-semibold">
-                  True
-                </div>
+                <div className="mt-2 text-sm font-semibold">True</div>
               </div>
 
               <div
@@ -512,13 +458,9 @@ function App() {
                     : "border-slate-200 bg-slate-50 text-slate-500"
                 }`}
               >
-                <div className="text-2xl">
-                  ✕
-                </div>
+                <div className="text-2xl">✕</div>
 
-                <div className="mt-2 text-sm font-semibold">
-                  False
-                </div>
+                <div className="mt-2 text-sm font-semibold">False</div>
               </div>
             </div>
           )}
@@ -553,18 +495,17 @@ function App() {
             </div>
           )}
 
-          {type === "guess_number" &&
-            item.answer !== undefined && (
-              <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-600">
-                  Answer
-                </p>
+          {type === "guess_number" && item.answer !== undefined && (
+            <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-600">
+                Answer
+              </p>
 
-                <p className="mt-2 text-sm font-semibold text-slate-900">
-                  {item.answer}
-                </p>
-              </div>
-            )}
+              <p className="mt-2 text-sm font-semibold text-slate-900">
+                {item.answer}
+              </p>
+            </div>
+          )}
 
           {/* Explanation */}
           {item.explanation && (
@@ -593,33 +534,31 @@ function App() {
               </div>
 
               <div className="grid gap-2 sm:grid-cols-2">
-                {item.sources.map(
-                  (source, sourceIndex) => (
-                    <a
-                      key={sourceIndex}
-                      href={source.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="rounded-xl border border-slate-200 bg-white p-3 transition hover:border-orange-200 hover:bg-orange-50/50"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <p className="truncate text-xs font-medium text-slate-700">
-                          {source.title}
-                        </p>
-
-                        {source.trusted && (
-                          <span className="shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-600">
-                            Trusted
-                          </span>
-                        )}
-                      </div>
-
-                      <p className="mt-1 truncate text-[11px] text-slate-400">
-                        {source.url}
+                {item.sources.map((source, sourceIndex) => (
+                  <a
+                    key={sourceIndex}
+                    href={source.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded-xl border border-slate-200 bg-white p-3 transition hover:border-orange-200 hover:bg-orange-50/50"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="truncate text-xs font-medium text-slate-700">
+                        {source.title}
                       </p>
-                    </a>
-                  )
-                )}
+
+                      {source.trusted && (
+                        <span className="shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-600">
+                          Trusted
+                        </span>
+                      )}
+                    </div>
+
+                    <p className="mt-1 truncate text-[11px] text-slate-400">
+                      {source.url}
+                    </p>
+                  </a>
+                ))}
               </div>
             </div>
           )}
@@ -632,22 +571,20 @@ function App() {
               </p>
 
               <div className="space-y-3">
-                {item.knowledge_sources.map(
-                  (source, sourceIndex) => (
-                    <div
-                      key={sourceIndex}
-                      className="rounded-xl border border-slate-200 bg-white p-3"
-                    >
-                      <p className="text-[11px] uppercase tracking-wider text-slate-400">
-                        {source.category || "Fact"}
-                      </p>
+                {item.knowledge_sources.map((source, sourceIndex) => (
+                  <div
+                    key={sourceIndex}
+                    className="rounded-xl border border-slate-200 bg-white p-3"
+                  >
+                    <p className="text-[11px] uppercase tracking-wider text-slate-400">
+                      {source.category || "Fact"}
+                    </p>
 
-                      <p className="mt-1 text-xs leading-5 text-slate-600">
-                        {source.text}
-                      </p>
-                    </div>
-                  )
-                )}
+                    <p className="mt-1 text-xs leading-5 text-slate-600">
+                      {source.text}
+                    </p>
+                  </div>
+                ))}
               </div>
             </div>
           )}
@@ -664,7 +601,6 @@ function App() {
       </div>
 
       <div className="relative mx-auto flex min-h-screen max-w-[1500px]">
-
         {/* SIDEBAR */}
         <aside className="hidden w-64 shrink-0 border-r border-slate-200 bg-white/80 px-5 py-6 backdrop-blur-xl lg:block">
           <div className="flex items-center gap-3 px-2">
@@ -673,13 +609,9 @@ function App() {
             </div>
 
             <div>
-              <p className="text-sm font-bold text-slate-900">
-                Sports AI
-              </p>
+              <p className="text-sm font-bold text-slate-900">Sports AI</p>
 
-              <p className="text-xs text-slate-400">
-                Content Studio
-              </p>
+              <p className="text-xs text-slate-400">Content Studio</p>
             </div>
           </div>
 
@@ -696,9 +628,7 @@ function App() {
             </button>
 
             <button
-              onClick={() =>
-                setShowHistory((prev) => !prev)
-              }
+              onClick={() => setShowHistory((prev) => !prev)}
               className={`w-full rounded-xl px-4 py-3 text-left text-sm transition ${
                 showHistory
                   ? "bg-orange-50 font-medium text-orange-600"
@@ -717,16 +647,12 @@ function App() {
           </div>
 
           <div className="mt-10 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <p className="text-xs font-semibold text-slate-600">
-              Local AI
-            </p>
+            <p className="text-xs font-semibold text-slate-600">Local AI</p>
 
             <div className="mt-3 flex items-center gap-2">
               <span className="h-2 w-2 rounded-full bg-emerald-500" />
 
-              <span className="text-xs text-slate-500">
-                Ollama Connected
-              </span>
+              <span className="text-xs text-slate-500">Ollama Connected</span>
             </div>
 
             <p className="mt-2 text-[11px] leading-5 text-slate-400">
@@ -737,13 +663,10 @@ function App() {
 
         {/* MAIN */}
         <main className="min-w-0 flex-1 px-5 py-6 sm:px-8 lg:px-10 lg:py-8">
-
           {/* Top bar */}
           <div className="mb-8 flex items-center justify-between">
             <div className="lg:hidden">
-              <p className="text-sm font-bold text-slate-900">
-                Sports AI
-              </p>
+              <p className="text-sm font-bold text-slate-900">Sports AI</p>
             </div>
 
             <div className="ml-auto flex items-center gap-3">
@@ -773,8 +696,8 @@ function App() {
               </h1>
 
               <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-500 sm:text-base">
-                Generate quizzes, polls and interactive sports
-                content with AI-powered search, retrieval and local models.
+                Generate quizzes, polls and interactive sports content with
+                AI-powered search, retrieval and local models.
               </p>
 
               <div className="mt-6 flex flex-wrap gap-2">
@@ -828,26 +751,19 @@ function App() {
                   {history.map((item) => (
                     <button
                       key={item.id}
-                      onClick={() =>
-                        loadHistoryItem(item)
-                      }
+                      onClick={() => loadHistoryItem(item)}
                       className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left transition hover:border-orange-200 hover:bg-orange-50/50"
                     >
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <div>
                           <p className="text-sm font-medium text-slate-900">
-                            {item.sport} ·{" "}
-                            {getTypeLabel(
-                              item.contentType
-                            )}
+                            {item.sport} · {getTypeLabel(item.contentType)}
                           </p>
 
                           <p className="mt-1 text-xs text-slate-500">
                             {item.quantity}{" "}
-                            {item.quantity === 1
-                              ? "item"
-                              : "items"}{" "}
-                            · {item.difficulty}
+                            {item.quantity === 1 ? "item" : "items"} ·{" "}
+                            {item.difficulty}
                           </p>
                         </div>
 
@@ -923,11 +839,8 @@ function App() {
                         setQuantity(
                           Math.min(
                             20,
-                            Math.max(
-                              1,
-                              Number(e.target.value) || 1
-                            )
-                          )
+                            Math.max(1, Number(e.target.value) || 1),
+                          ),
                         )
                       }
                       className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-orange-300 focus:ring-4 focus:ring-orange-100"
@@ -987,9 +900,7 @@ function App() {
 
                         <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-500">
                           {content.length}{" "}
-                          {content.length === 1
-                            ? "item"
-                            : "items"}
+                          {content.length === 1 ? "item" : "items"}
                         </span>
                       </div>
 
@@ -1006,9 +917,7 @@ function App() {
                     </button>
                   </div>
 
-                  <div className="space-y-6">
-                    {content.map(renderItem)}
-                  </div>
+                  <div className="space-y-6">{content.map(renderItem)}</div>
                 </section>
               )}
             </>
